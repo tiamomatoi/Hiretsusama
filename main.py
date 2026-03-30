@@ -5,9 +5,10 @@ from playwright.async_api import async_playwright
 from PIL import Image
 import io, re, datetime, time
 from dateutil import parser, tz
+import os
 
 # --- CONFIG ---
-TOKEN = 'SECRET'
+TOKEN = os.environ.get('DISCORD_TOKEN')
 SERVER_IDs = [
     #BotTest
     1487365664820690984,
@@ -158,9 +159,10 @@ async def spiker(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="cm", description="Upcoming clan matches")
-async def matches(interaction: discord.Interaction):
+@bot.tree.command(name="cm", description="Shows all upcoming clan matches and highlights the next one")
+async def cm(interaction: discord.Interaction):
     await interaction.response.defer()
+
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(viewport={'width': 1280, 'height': 3000})
@@ -168,65 +170,46 @@ async def matches(interaction: discord.Interaction):
         try:
             await page.goto(TARGET_URL, wait_until="networkidle")
 
-            now = datetime.datetime.now()
-            # Start/End of week for "This Week" filtering
-            start_of_week = (now - datetime.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0,
-                                                                                   microsecond=0)
-            end_of_week = (start_of_week + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59,
-                                                                               microsecond=0)
-
+            # Grab the header image
             header_loc = page.locator(HEADER_SEL)
             await header_loc.wait_for(state="attached", timeout=10000)
             header_img = Image.open(io.BytesIO(await header_loc.screenshot()))
 
             final_images = [header_img]
-            weekly_imgs = []
-            future_matches = []
+            next_event_dt = None
+            now_ts = time.time()
 
+            # Iterate through ALL possible event slots
             for selector in EVENT_SELECTORS:
                 loc = page.locator(selector)
-                try:
-                    await loc.wait_for(state="attached", timeout=5000)
-                    text = await loc.inner_text()
+                if await loc.count() > 0:
+                    try:
+                        text = await loc.inner_text()
+                        # Extract PDT time
+                        date_match = re.search(r'\[PDT\]\s*(\d{2}/\d{2}/\d{4}\s*\d{2}:\d{2})', text)
 
-                    date_match = re.search(r'(\d{2,4}/\d{2}/\d{2,4} \d{2}:\d{2})', text)
-                    if date_match:
-                        match_dt = parser.parse(date_match.group(1))
-                        img_bytes = await loc.screenshot()
-                        row_img = Image.open(io.BytesIO(img_bytes))
+                        if date_match:
+                            match_dt = parser.parse(date_match.group(1)).replace(tzinfo=TZ_OFFSETS['PDT'])
+                            match_ts = match_dt.timestamp()
 
-                        if start_of_week <= match_dt <= end_of_week:
-                            weekly_imgs.append((match_dt, row_img))
-                        elif match_dt > now:
-                            future_matches.append((match_dt, row_img))
-                except:
-                    continue
+                            # Add every found event to the image list
+                            final_images.append(Image.open(io.BytesIO(await loc.screenshot())))
+
+                            # Logic: If this match is in the future AND (we haven't found one yet OR it's sooner than the one we found)
+                            if match_ts > now_ts:
+                                if next_event_dt is None or match_ts < next_event_dt.timestamp():
+                                    next_event_dt = match_dt
+                    except Exception as e:
+                        print(f"Skipping selector {selector}: {e}")
+                        continue
 
             await browser.close()
 
-            status_desc = ""
+            if len(final_images) < 2:
+                await interaction.followup.send("No clan match data found on the page.")
+                return
 
-            # UPDATED LOGIC: Add all found rows to final_images
-            if weekly_imgs:
-                # Sort weekly matches by date
-                weekly_imgs.sort(key=lambda x: x[0])
-                for dt, img in weekly_imgs:
-                    final_images.append(img)
-                target_dt = weekly_imgs[0][0]
-                status_desc = f"This week's match: <t:{int(time.mktime(target_dt.timetuple()))}:F>"
-
-            elif future_matches:
-                # Sort all future matches by date
-                future_matches.sort(key=lambda x: x[0])
-                for dt, img in future_matches:
-                    final_images.append(img)
-                target_dt = future_matches[0][0]
-                status_desc = f"No match this week. Next match: <t:{int(time.mktime(target_dt.timetuple()))}:F>"
-
-            else:
-                status_desc = "No upcoming clan matches were found."
-
-            # Vertical Stitching (Includes all collected rows)
+            # Combine all images (Header + all Event rows)
             total_h = sum(img.height for img in final_images)
             max_w = max(img.width for img in final_images)
             canvas = Image.new('RGB', (max_w, total_h), (255, 255, 255))
@@ -239,17 +222,23 @@ async def matches(interaction: discord.Interaction):
             with io.BytesIO() as buf:
                 canvas.save(buf, 'PNG')
                 buf.seek(0)
-                file_obj = discord.File(fp=buf, filename='schedule.png')
-                embed = discord.Embed(title="Clan Match Schedule", description=status_desc, url=TARGET_URL,
-                                      color=0x3498db)
+
+                desc = "Showing all scheduled matches."
+                if next_event_dt:
+                    desc = f"**Next Upcoming Match:** <t:{int(next_event_dt.timestamp())}:F> (<t:{int(next_event_dt.timestamp())}:R>)"
+                else:
+                    desc = "All listed matches have already passed."
+
+                embed = discord.Embed(title="Clan Match Schedule", description=desc, color=0x3498db)
                 embed.set_image(url="attachment://schedule.png")
 
-                await interaction.followup.send(file=file_obj, embed=embed)
+                await interaction.followup.send(
+                    file=discord.File(fp=buf, filename='schedule.png'),
+                    embed=embed
+                )
 
         except Exception as e:
-            if not interaction.response.is_done():
-                await interaction.followup.send(f"Error: {e}")
-            else:
-                print(f"Captured Error: {e}")
+            await interaction.followup.send(f"An error occurred: {e}")
+
 
 bot.run(TOKEN)

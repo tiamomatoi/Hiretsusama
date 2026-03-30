@@ -7,7 +7,7 @@ import io, re, datetime, time
 from dateutil import parser, tz
 
 # --- CONFIG ---
-TOKEN = 'MTQ4NzM2OTA2MDQwMzY0MjQ1OA.GoNTFu.4pe2hIkV4NsLCrClIBWrnXgdSs8Ja-gcfFXHQY'
+TOKEN = 'SECRET'
 SERVER_IDs = [
     #BotTest
     1487365664820690984,

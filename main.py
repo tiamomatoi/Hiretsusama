@@ -6,19 +6,21 @@ from PIL import Image
 import io, re, datetime, time
 from dateutil import parser, tz
 import os
+import asyncio
+from google import genai
+
+client = genai.Client(api_key="GENAI_API_KEY")
+
+# --- SUPPORT SERVERS ---
+BotTest = 1487365664820690984
+BingChilling = 1173182782751658004
+APS = 700475873991852053
+M_Men = 1085839237255024700
 
 # --- CONFIG ---
-TOKEN = os.environ.get('DISCORD_TOKEN')
-SERVER_IDs = [
-    #BotTest
-    1487365664820690984,
-
-    #Zaoshanghaozhongguoxianzaiwoyoubingqilin
-    1173182782751658004,
-
-    #A P S
-    700475873991852053
-]
+TOKEN = 'DISCORD_TOKEN'
+SERVER_IDs = [BotTest, BingChilling, APS, M_Men]
+SERVER_NAMES = ["BotTest", "BingChilling", "APS", "M_MEN"]
 TARGET_URL = "https://bo2.ggame.jp/en/info/?p=26936"
 
 TZ_OFFSETS = {'PDT': tz.gettz('America/Los_Angeles'), 'CET': tz.gettz('Europe/Berlin')}
@@ -38,7 +40,6 @@ class MatchBot(commands.Bot):
         intents.guild_scheduled_events = True
         intents.members = True
         super().__init__(command_prefix="m.", intents=intents)
-        # FIX: Dictionary to store channel IDs for each server separately
         self.guild_reminder_channels = {}
 
     async def setup_hook(self):
@@ -48,13 +49,12 @@ class MatchBot(commands.Bot):
             await self.tree.sync(guild=guild_obj)
 
         self.check_events.start()
-        print(f"Synced commands to {SERVER_IDs} and started reminder loop.")
+        print(f"Synced commands to {SERVER_NAMES} and started reminder loop.")
 
     @tasks.loop(minutes=1)
     async def check_events(self):
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        # FIX: Loop through all guilds the bot is in
         for guild in self.guilds:
             channel_id = self.guild_reminder_channels.get(guild.id)
             if not channel_id:
@@ -77,16 +77,18 @@ class MatchBot(commands.Bot):
 
 bot = MatchBot()
 
-
+#Bot Status
 @bot.event
 async def on_ready():
     await bot.change_presence(status=discord.Status.dnd,
                               activity=discord.CustomActivity(name="囮役はもちろんオレ以外が行く"))
 
-
+#Clan Match Event Scheduler
 @bot.tree.command(name="cmevent", description="Returns Clan Match schedule and auto-create Discord event")
-@app_commands.describe(location="Meeting point", reminder_channel="Channel for 30-min reminder")
-async def matches(interaction: discord.Interaction, location: str, reminder_channel: discord.TextChannel):
+@app_commands.describe(location="Meeting location", reminder_channel="Channel for 30-min reminder", role="Which role to ping", custom_description="Custom description")
+async def matches(interaction: discord.Interaction, location: str, reminder_channel: discord.TextChannel, role: discord.Role, custom_description: str):
+    if str(role) != "@everyone":
+        role = role.mention
     await interaction.response.defer()
     bot.guild_reminder_channels[interaction.guild_id] = reminder_channel.id
 
@@ -136,21 +138,21 @@ async def matches(interaction: discord.Interaction, location: str, reminder_chan
                 try:
                     new_event = await interaction.guild.create_scheduled_event(
                         name="Clan Match", start_time=target_dt, end_time=target_dt + datetime.timedelta(hours=2),
-                        entity_type=discord.EntityType.external, location=location, image=buf.getvalue(),
+                        entity_type=discord.EntityType.external, location=location, description=custom_description, image=buf.getvalue(),
                         privacy_level=discord.PrivacyLevel.guild_only
                     )
-                    status_desc += f"\n✅ **Scheduled Event:** {new_event.url}"
+                    status_desc += f"\n\n{custom_description}\n\n✅ **Scheduled Event:** {new_event.url}"
                 except Exception as e:
                     status_desc += f"\n⚠️ Event error: {e}"
-
+                allowed = discord.AllowedMentions(roles=True)
                 await interaction.followup.send(file=discord.File(fp=buf, filename='schedule.png'),
                                                 embed=discord.Embed(title="Clan Match Schedule",
                                                                     description=status_desc, color=0x3498db).set_image(
-                                                    url="attachment://schedule.png"))
+                                                    url="attachment://schedule.png"), content=f"{role}", allowed_mentions=allowed)
         except Exception as e:
             await interaction.followup.send(f"Error: {e}")
 
-
+#Spiker is an M
 @bot.tree.command(name="spiker", description="Deep dark fantasy")
 async def spiker(interaction: discord.Interaction):
     embed = discord.Embed(title="SPIKER IS AN M", url="https://www.youtube.com/watch?v=QPQZZqAHJiE",
@@ -158,7 +160,63 @@ async def spiker(interaction: discord.Interaction):
     embed.set_image(url="https://cdn.discordapp.com/attachments/1487365665949093910/1487645740984565760/Rucz.gif")
     await interaction.response.send_message(embed=embed)
 
+#Spiker is an M Story
+spikerprompt = ("Tell me a five paragraph story about how a person literally named Spiker "
+          "(his legal name is literally Spiker) became an M (M is ambiguous, try to tell in "
+          "a way where M is not explicitly defined. Do not mention any explanation "
+          "or background of the name Spiker though. Bold M whenever you use it.")
+@bot.tree.command(name="spikerlore", description="Spiker lore")
+async def chat(interaction: discord.Interaction):
+    await interaction.response.defer()
+    responses = client.models.generate_content_stream(
+        model="gemini-2.5-flash",
+        contents=spikerprompt,
+    )
 
+    current_line = ""
+    for chunk in responses:
+        if chunk.text:
+            current_line += chunk.text
+            if "\n" in current_line:
+                lines = current_line.split("\n")
+                for line in lines[:-1]:
+                    if line.strip():
+                        await interaction.followup.send(line.strip())
+                        await asyncio.sleep(5)  # Rate limit safety
+                current_line = lines[-1]
+
+    if current_line.strip():
+        await interaction.followup.send(current_line.strip())
+
+
+harryprompt = ("Tell me a five paragraph story about how a person literally named Harry "
+          "(his legal name is literally Harry) became gay (Do not mention the names of any partners "
+          " and do not mention any explanation "
+          "or background of Harry's name. Bold gay whenever you use it.")
+@bot.tree.command(name="harrylore", description="Harrylie lore")
+async def chat(interaction: discord.Interaction):
+    await interaction.response.defer()
+    responses = client.models.generate_content_stream(
+        model="gemini-2.5-flash",
+        contents=harryprompt,
+    )
+
+    current_line = ""
+    for chunk in responses:
+        if chunk.text:
+            current_line += chunk.text
+            if "\n" in current_line:
+                lines = current_line.split("\n")
+                for line in lines[:-1]:
+                    if line.strip():
+                        await interaction.followup.send(line.strip())
+                        await asyncio.sleep(5)  # Rate limit safety
+                current_line = lines[-1]
+
+    if current_line.strip():
+        await interaction.followup.send(current_line.strip())
+
+#Clan Match Schedules
 @bot.tree.command(name="cm", description="Shows all upcoming clan matches and highlights the next one")
 async def cm(interaction: discord.Interaction):
     await interaction.response.defer()

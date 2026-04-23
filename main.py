@@ -12,15 +12,12 @@ from google import genai
 client = genai.Client(api_key="GENAI_API_KEY")
 
 # --- SUPPORT SERVERS ---
-BotTest = 1487365664820690984
-BingChilling = 1173182782751658004
-APS = 700475873991852053
-M_Men = 1085839237255024700
+ServerName = 1234567890
 
 # --- CONFIG ---
 TOKEN = 'DISCORD_TOKEN'
-SERVER_IDs = [BotTest, BingChilling, APS, M_Men]
-SERVER_NAMES = ["BotTest", "BingChilling", "APS", "M_MEN"]
+SERVER_IDs = [ServerName]
+SERVER_NAMES = ["ServerName"]
 TARGET_URL = "https://bo2.ggame.jp/en/info/?p=26936"
 
 TZ_OFFSETS = {'PDT': tz.gettz('America/Los_Angeles'), 'CET': tz.gettz('Europe/Berlin')}
